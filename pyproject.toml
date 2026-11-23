@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "weather-cli"
+version = "1.0.0"
+description = "Hourly weather, sun, moon and tide forecasts in the terminal (NWS and Open-Meteo)"
+readme = "README.md"
+requires-python = ">=3.7"
+dependencies = []
+
+[project.scripts]
+nws = "weather:main"
+open-meteo = "weather:main"
+
+[tool.setuptools]
+py-modules = ["weather"]
