@@ -1186,8 +1186,8 @@ def build_parser(name):
                         "parentheses, e.g. 24x7 (quote * and parentheses: '24*7')")
     p.add_argument("-d", "--daily", action="store_true",
                    help="one line per day: high, low, rain chance and conditions")
-    p.add_argument("-p", "--periods", action="store_true",
-                   help="morning, afternoon, evening and night summaries")
+    p.add_argument("-p", "--periods", "-q", "--quarterly", action="store_true",
+                   help="the day in quarters: morning, afternoon, evening and night")
     p.add_argument("--days", type=whole_number, metavar="N",
                    help="days in the daily view (default %d) or period view (default %d); "
                         "without --periods it implies --daily" % (DEFAULT_DAYS, DEFAULT_PERIOD_DAYS))
@@ -1254,7 +1254,7 @@ def periods_help():
     """The 'period view' block for -h."""
     return "\n".join([
         "",
-        "period view (-p / --periods):",
+        "period view (-p / --periods, or -q / --quarterly):",
         "  what is left of today plus the next %d days; --days counts today too" % (DEFAULT_PERIOD_DAYS - 1),
         "  periods that are over are left out",
         "  Morning     6 AM to noon",

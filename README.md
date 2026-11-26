@@ -132,7 +132,7 @@ argument order. `nws -h` and `open-meteo -h` list them all.
 | `-h`, `-?`, `--help` | show the help (every option, the column list, examples) |
 | `-n`, `--hours N` | hours to show (default 24; `nws` goes up to 156, `open-meteo` up to about 16 days); can be calculated, see below |
 | `-d`, `--daily` | one line per day instead of hourly (see [Daily view](#daily-view)) |
-| `-p`, `--periods` | morning, afternoon, evening and night (see [Period view](#period-view)) |
+| `-p`, `--periods`, `-q`, `--quarterly` | the day in quarters: morning, afternoon, evening and night (see [Period view](#period-view)) |
 | `--days N` | days in the daily view (default 7) or period view (default 4); without `-p` it implies `--daily` |
 | `-z`, `--zip ZIP` | US ZIP code |
 | `--lat DEG --lon DEG` | coordinates (`nws` only, used together) |
@@ -194,6 +194,9 @@ today that only covers the hours left. These figures can differ from the
 daily forecast on weather.gov. `-n`, `-c` and `-f` don't apply to this view.
 
 ### Period view
+
+`-p` or `--periods` splits each day into four 6-hour quarters. `-q` and
+`--quarterly` mean the same thing.
 
 ```bash
 nws --periods                       # rest of today plus the next 3 days
