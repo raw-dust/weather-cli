@@ -51,9 +51,20 @@ pipx install .          # or: pip install --user .
 
 pip creates the `nws` and `open-meteo` commands for you (`.exe` launchers on
 Windows) and puts them on your PATH. `pipx` keeps the install isolated and is
-the cleanest; `pip install --user .` works too. Update the same way after
-editing the script (`pipx install --force .`).
+the cleanest; `pip install --user .` works too.
 
+- **Upgrading:** the installed commands use a copy of the code, so after
+  editing the script or pulling new changes, run this from this folder:
+
+  ```bash
+  pipx install --force .      # or: pip install --user .
+  ```
+
+  The `version` in `pyproject.toml` doesn't need to change for this.
+  `pipx upgrade weather-cli` also rereads the folder you installed from, but
+  with an unchanged version it says "already at latest version" even though it
+  copied your changes. To skip reinstalling after each
+  edit, install with `pipx install --force --editable .` instead.
 - **No `pipx` yet?** On Debian or Ubuntu: `sudo apt install pipx`. Then run
   `pipx ensurepath` if `~/.local/bin` is not on your PATH.
 - **"externally-managed-environment" error?** Debian 12 and later, Ubuntu 23.04
