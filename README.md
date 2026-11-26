@@ -54,6 +54,14 @@ Windows) and puts them on your PATH. `pipx` keeps the install isolated and is
 the cleanest; `pip install --user .` works too. Update the same way after
 editing the script (`pipx install --force .`).
 
+- **No `pipx` yet?** On Debian or Ubuntu: `sudo apt install pipx`. Then run
+  `pipx ensurepath` if `~/.local/bin` is not on your PATH.
+- **"externally-managed-environment" error?** Debian 12 and later, Ubuntu 23.04
+  and later, and some other systems block `pip install --user`. Use `pipx`
+  or the symlinks below.
+- **Used the symlinks before?** Remove them before installing with `pipx`,
+  which won't overwrite them: `rm ~/.local/bin/nws ~/.local/bin/open-meteo`.
+
 **2. Symlinks (Linux and macOS, no pip).** The script picks its behavior
 from the name it was called as, so each command is a symlink to it. They go
 in `~/.local/bin`, which must be on your PATH.
