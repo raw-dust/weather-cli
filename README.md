@@ -34,7 +34,7 @@ details below).
 | Command | Forecast from | Coverage |
 |---|---|---|
 | `nws` | National Weather Service API (`api.weather.gov`) | US only, about 6.5 days (156 hours) of hourly data |
-| `open-meteo` | Open-Meteo | Worldwide, 3 days of hourly data |
+| `open-meteo` | Open-Meteo | Worldwide, up to 16 days of hourly data |
 
 Both take the same options and print the same table, so you can run them side
 by side and compare. Install them below, then see [Usage](#usage).
@@ -119,7 +119,7 @@ argument order. `nws -h` and `open-meteo -h` list them all.
 | Option | Meaning |
 |---|---|
 | `-h`, `-?`, `--help` | show the help (every option, the column list, examples) |
-| `-n`, `--hours N` | hours to show (default 24; `nws` goes up to 156) |
+| `-n`, `--hours N` | hours to show (default 24; `nws` goes up to 156, `open-meteo` up to about 16 days); can be calculated, see below |
 | `-z`, `--zip ZIP` | US ZIP code |
 | `--lat DEG --lon DEG` | coordinates (`nws` only, used together) |
 | `-C`, `--city NAME` | city name, anywhere in the world (`open-meteo` only) |
@@ -133,6 +133,20 @@ argument order. `nws -h` and `open-meteo -h` list them all.
 | `--sky` / `--no-sky` | sun and moon lines and sunrise/sunset markers |
 | `--twilight KIND` | twilight on the sun line: `civil` (default), `nautical`, `astronomical` or `none` |
 | `--tides` / `--no-tides` | tide line and markers |
+
+### Calculated hours
+
+`-n` accepts a sum as well as a number, using `+ - * /`, `x` (same as `*`) and
+parentheses. The result must be a positive whole number.
+
+```bash
+open-meteo -n 24x7          # one week
+nws -n '24*3'               # three days
+nws -n '(2+1)*24'
+```
+
+Quote anything with `*` or parentheses so your shell doesn't interpret it
+(fish reports "No matches for wildcard" otherwise). `24x7` needs no quotes.
 
 ### `nws`
 
@@ -271,7 +285,7 @@ Regional models only work for locations inside their area.
 This is the list offered at [open-meteo.com/en/docs](https://open-meteo.com/en/docs),
 without the discontinued models; it can change over time. Older short names such
 as `gfs_seamless`, `icon_seamless` and `gem_seamless` also work. A model may leave
-a column empty (for example rain chance) or stop before the end of the three days.
+a column empty (for example rain chance) or stop before the last hour you asked for.
 `nws` is not an Open-Meteo model, so it has no `--model` option; running it next to
 `open-meteo --model ...` is a good way to compare forecasts.
 

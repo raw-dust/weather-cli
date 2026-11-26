@@ -2,11 +2,13 @@
 """Hourly weather in the terminal: `nws` (US National Weather Service) and
 `open-meteo` (worldwide). Run either with -h for options and examples."""
 import argparse
+import ast
 import concurrent.futures
 import difflib
 import datetime as dt
 import json
 import math
+import operator
 import os
 import re
 import tempfile
@@ -145,6 +147,34 @@ WIND_COLOR = [(10, 41), (20, 220), (30, 208), (999, 196)]
 HUM_COLOR = [(30, 220), (60, 41), (80, 45), (999, 33)]
 CLOUD_COLOR = [(20, 39), (40, 75), (60, 110), (80, 248), (999, 244)]   # clear blue -> overcast gray
 FEELS_MIN_DIFF = 3   # show "Feels" only when it differs from Temp by this many degrees
+
+
+OPERATORS = {ast.Add: operator.add, ast.Sub: operator.sub,
+             ast.Mult: operator.mul, ast.Div: operator.truediv}
+
+
+def whole_number(text):
+    """Option value such as '48', '24*7', '24x7' or '(2+1)*24' -> positive int.
+    Only numbers, + - * / and parentheses are evaluated (no eval)."""
+    def value(node):
+        if isinstance(node, ast.BinOp) and type(node.op) in OPERATORS:
+            return OPERATORS[type(node.op)](value(node.left), value(node.right))
+        # Python 3.8+ stores the number in .value, 3.7 in .n
+        number = node.value if hasattr(node, "value") else getattr(node, "n", None)
+        if type(number) is int:
+            return number
+        raise ValueError
+
+    try:
+        if len(text) > 50:
+            raise ValueError
+        result = value(ast.parse(re.sub("[xX]", "*", text.strip()), mode="eval").body)
+        if result < 1 or result != int(result):
+            raise ValueError
+    except (ValueError, SyntaxError, ZeroDivisionError):
+        raise argparse.ArgumentTypeError(
+            f"'{text}' is not a positive whole number or sum such as 48 or 24x7")
+    return int(result)
 
 
 def render(title, rows, columns, info=None):
@@ -651,7 +681,9 @@ def open_meteo(hours, lat, lon, label, columns, sky=True, tides=True, fav=None, 
                   "relative_humidity_2m,apparent_temperature,cloud_cover,is_day",
         "temperature_unit": "fahrenheit", "wind_speed_unit": "mph",
         "daily": "sunrise,sunset",
-        "timezone": "auto", "forecast_days": 3}
+        "timezone": "auto",
+        # enough days for the hours asked (today is partly over); 16 is the API maximum
+        "forecast_days": min(16, max(3, (hours + 47) // 24))}
     if model:
         params["models"] = model
     try:
@@ -663,7 +695,7 @@ def open_meteo(hours, lat, lon, label, columns, sky=True, tides=True, fav=None, 
         raise
     h = data["hourly"]
 
-    def val(key, i):   # some models leave a variable empty or end before 3 days
+    def val(key, i):   # some models leave a variable empty or end early
         series = h.get(key)
         return series[i] if series and i < len(series) else None
 
@@ -974,7 +1006,9 @@ def build_parser(name):
     if not nws_cmd:
         p.add_argument("--model", metavar="NAME",
                        help="weather model to use (default best_match); see \"models\" below")
-    p.add_argument("-n", "--hours", type=int, metavar="N", help="hours to show (default 24)")
+    p.add_argument("-n", "--hours", type=whole_number, metavar="N",
+                   help="hours to show (default 24); can be calculated with + - * / x and "
+                        "parentheses, e.g. 24x7 (quote * and parentheses: '24*7')")
     p.add_argument("-c", "--columns", metavar="LIST",
                    help="columns to show, see \"available columns\" below; default %s" % DEFAULT_COLUMNS)
     p.add_argument("-f", "--full", action="store_true",
@@ -1044,6 +1078,7 @@ EXAMPLES_NWS = """
 examples:
   nws                          next 24 hours at the default location
   nws --hours 48               next 48 hours
+  nws -n 24x6                  next 6 days
   nws --zip 32202 -n 12        another ZIP code (downtown Jacksonville)
   nws --lat 30.33 --lon -81.66
   nws --full                   every column
@@ -1055,6 +1090,7 @@ EXAMPLES_OPEN_METEO = """
 examples:
   open-meteo                   next 24 hours at the default location
   open-meteo --city Jacksonville -n 12
+  open-meteo -n 24x7           a week (up to 16 days)
   open-meteo --city "Jacksonville, FL"
   open-meteo --zip 32202
   open-meteo --full            every column
