@@ -830,7 +830,7 @@ def nws(hours, lat, lon, columns, sky=True, tides=True, fav=None, twilight="civi
     if days:
         render_daily("NWS daily forecast: " + title, daily_rows(rows, days), info)
     elif period_days:
-        render("NWS period forecast: " + title, period_rows(rows, period_days, now), columns, info)
+        render("NWS quarter-day period forecast: " + title, period_rows(rows, period_days, now), columns, info)
     else:
         render("NWS hourly forecast: " + title, rows, columns, info)
 
@@ -923,7 +923,7 @@ def open_meteo(hours, lat, lon, label, columns, sky=True, tides=True, fav=None, 
         render_daily("Open-Meteo daily forecast: " + title, daily_rows(rows, days), info)
     elif period_days:
         now_hour = dt.datetime.fromisoformat(data["current"]["time"][:13] + ":00")
-        render("Open-Meteo period forecast: " + title, period_rows(rows, period_days, now_hour),
+        render("Open-Meteo quarter-day period forecast: " + title, period_rows(rows, period_days, now_hour),
                columns, info)
     else:
         render("Open-Meteo hourly forecast: " + title, rows, columns, info)
