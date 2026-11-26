@@ -170,34 +170,101 @@ You can also run the script directly, naming the command first:
 ### Choosing the Open-Meteo model
 
 Open-Meteo blends many national weather models. By default (`best_match`) it
-picks the best one for the location and doesn't say which; in my tests for
-Jacksonville the numbers matched NOAA's GFS exactly. `--model NAME` (or the `WEATHER_MODEL`
-environment variable) forces a specific model, and the title then ends with
-`· model NAME`:
+picks one for the location and doesn't say which. `--model NAME` (or the
+`WEATHER_MODEL` environment variable) forces a specific model, and the title then
+ends with `· model NAME`:
 
 ```bash
-open-meteo --model icon_seamless
+open-meteo --model dwd_icon_seamless
 open-meteo --model ecmwf_ifs025 -n 12 -c time,temp,rain,cond
 ```
 
-| Model | Source |
+Regional models only work for locations inside their area.
+
+**Default**
+
+| Model | Description |
 |---|---|
 | `best_match` | automatic choice for the location (the default) |
-| `gfs_seamless` | NOAA GFS, USA |
-| `icon_seamless` | DWD ICON, Germany |
-| `ecmwf_ifs025` | ECMWF IFS, Europe |
-| `gem_seamless` | Environment Canada GEM |
-| `meteofrance_seamless` | Météo-France |
-| `ukmo_seamless` | UK Met Office |
-| `jma_seamless` | Japan Meteorological Agency |
 
-These eight are the ones I tested; Open-Meteo has 30 or more (see
-[open-meteo.com/en/docs](https://open-meteo.com/en/docs)) and any valid name
-works. Models can disagree noticeably: on one test day they differed by up to
-8°F at the same hour for Jacksonville. A model may leave a column empty (Météo-France
-and JMA publish no rain chance, so it shows `-`) or stop before the end of the
-three days. An unknown name gives a message listing the choices above. `nws` is
-not an Open-Meteo model, so it has no `--model` option; running it next to
+**Worldwide**
+
+| Model | Description |
+|---|---|
+| `ecmwf_ifs` | ECMWF IFS HRES 9km |
+| `ecmwf_ifs025` | ECMWF IFS 0.25° |
+| `ecmwf_aifs025_single` | ECMWF AIFS 0.25° Single |
+| `cma_grapes_global` | CMA GRAPES Global |
+| `ncep_gfs_seamless` | NCEP GFS Seamless |
+| `ncep_gfs_global` | NCEP GFS Global 0.11°/0.25° |
+| `ncep_aigfs025` | NCEP AIGFS 0.25° |
+| `ncep_hgefs025_ensemble_mean` | NCEP HGEFS 0.25° Ensemble Mean |
+| `jma_seamless` | JMA Seamless |
+| `jma_gsm` | JMA GSM |
+| `dwd_icon_seamless` | DWD ICON Seamless |
+| `dwd_icon_global` | DWD ICON Global |
+| `dwd_icon_global_native` | DWD ICON Global Native |
+| `dwd_aicon_global_native` | DWD AICON Global Native |
+| `cmc_gem_seamless` | GEM Seamless |
+| `cmc_gem_gdps` | GEM Global |
+| `meteofrance_seamless` | Météo-France Seamless |
+| `meteofrance_arpege_world` | Météo-France ARPEGE World |
+| `metno_seamless` | MET Norway Nordic Seamless (with ECMWF) |
+| `knmi_seamless` | KNMI Seamless (with ECMWF) |
+| `dmi_seamless` | DMI Seamless (with ECMWF) |
+| `ukmo_seamless` | UK Met Office Seamless |
+| `ukmo_global_deterministic_10km` | UK Met Office Global 10km |
+| `geosphere_seamless` | GeoSphere Seamless (with ECMWF) |
+
+**North America only**
+
+| Model | Description |
+|---|---|
+| `ncep_rrfs_north_america` | NCEP RRFS North America |
+| `ncep_rrfs_conus` | NCEP RRFS U.S. CONUS |
+| `ncep_hrrr_conus` | NCEP HRRR U.S. CONUS |
+| `ncep_nbm_conus` | NCEP NBM U.S. CONUS |
+| `cmc_gem_rdps` | GEM Regional |
+| `cmc_gem_hrdps` | GEM HRDPS Continental |
+| `cmc_gem_hrdps_west` | GEM HRDPS West |
+
+**Europe only**
+
+| Model | Description |
+|---|---|
+| `dwd_icon_eu` | DWD ICON EU |
+| `dwd_icon_eu_native` | DWD ICON EU Native |
+| `dwd_icon_d2` | DWD ICON D2 |
+| `dwd_icon_d2_native` | DWD ICON D2 Native |
+| `dwd_icon_d2_ruc_native` | DWD ICON D2 RUC Native |
+| `meteofrance_arpege_europe` | Météo-France ARPEGE Europe |
+| `meteofrance_arome_france` | Météo-France AROME France |
+| `meteofrance_arome_france_hd` | Météo-France AROME France HD |
+| `italia_meteo_arpae_icon_2i` | ItaliaMeteo ARPAE ICON 2I |
+| `metno_nordic` | MET Norway Nordic |
+| `knmi_harmonie_arome_europe` | KNMI Harmonie AROME Europe |
+| `knmi_harmonie_arome_netherlands` | KNMI Harmonie AROME Netherlands |
+| `dmi_harmonie_arome_europe` | DMI Harmonie AROME Europe |
+| `ukmo_uk_deterministic_2km` | UK Met Office UK 2km |
+| `meteoswiss_icon_seamless` | MeteoSwiss ICON Seamless |
+| `meteoswiss_icon_ch1` | MeteoSwiss ICON CH1 |
+| `meteoswiss_icon_ch2` | MeteoSwiss ICON CH2 |
+| `geosphere_claef_austria` | GeoSphere C-LAEF Austria |
+| `chmi_aladin_seamless` | CHMI Aladin Seamless |
+| `chmi_aladin_central_europe_2km` | CHMI Aladin Central Europe 2km |
+| `chmi_aladin_cz_1km` | CHMI Aladin CZ 1km |
+
+**Japan only**
+
+| Model | Description |
+|---|---|
+| `jma_msm` | JMA MSM |
+
+This is the list offered at [open-meteo.com/en/docs](https://open-meteo.com/en/docs),
+without the discontinued models; it can change over time. Older short names such
+as `gfs_seamless`, `icon_seamless` and `gem_seamless` also work. A model may leave
+a column empty (for example rain chance) or stop before the end of the three days.
+`nws` is not an Open-Meteo model, so it has no `--model` option; running it next to
 `open-meteo --model ...` is a good way to compare forecasts.
 
 ### Favorite locations

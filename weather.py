@@ -658,8 +658,8 @@ def open_meteo(hours, lat, lon, label, columns, sky=True, tides=True, fav=None, 
         data = json.loads(fetch("https://api.open-meteo.com/v1/forecast", params))
     except SystemExit as e:
         if model and "Invalid value" in str(e.code):
-            sys.exit(f"Open-Meteo doesn't know the model '{model}'. Some choices: "
-                     f"{', '.join(MODELS)} (see -h).")
+            sys.exit(f"Open-Meteo doesn't know the model '{model}'. Run open-meteo -h "
+                     "for the model list.")
         raise
     h = data["hourly"]
 
@@ -722,15 +722,71 @@ def open_meteo(hours, lat, lon, label, columns, sky=True, tides=True, fav=None, 
            rows, columns, info)
 
 
-MODELS = {   # name -> description; a few of Open-Meteo's models, all tested
-    "best_match": "automatic choice for the location (the default)",
-    "gfs_seamless": "NOAA GFS, USA",
-    "icon_seamless": "DWD ICON, Germany",
-    "ecmwf_ifs025": "ECMWF IFS, Europe",
-    "gem_seamless": "Environment Canada GEM",
-    "meteofrance_seamless": "Meteo-France",
-    "ukmo_seamless": "UK Met Office",
-    "jma_seamless": "Japan Meteorological Agency",
+MODEL_GROUPS = {   # coverage -> {name: description}, as offered on open-meteo.com/en/docs
+    "Default": {
+        "best_match": "automatic choice for the location (the default)",
+    },
+    "Worldwide": {
+        "ecmwf_ifs": "ECMWF IFS HRES 9km",
+        "ecmwf_ifs025": "ECMWF IFS 0.25°",
+        "ecmwf_aifs025_single": "ECMWF AIFS 0.25° Single",
+        "cma_grapes_global": "CMA GRAPES Global",
+        "ncep_gfs_seamless": "NCEP GFS Seamless",
+        "ncep_gfs_global": "NCEP GFS Global 0.11°/0.25°",
+        "ncep_aigfs025": "NCEP AIGFS 0.25°",
+        "ncep_hgefs025_ensemble_mean": "NCEP HGEFS 0.25° Ensemble Mean",
+        "jma_seamless": "JMA Seamless",
+        "jma_gsm": "JMA GSM",
+        "dwd_icon_seamless": "DWD ICON Seamless",
+        "dwd_icon_global": "DWD ICON Global",
+        "dwd_icon_global_native": "DWD ICON Global Native",
+        "dwd_aicon_global_native": "DWD AICON Global Native",
+        "cmc_gem_seamless": "GEM Seamless",
+        "cmc_gem_gdps": "GEM Global",
+        "meteofrance_seamless": "Météo-France Seamless",
+        "meteofrance_arpege_world": "Météo-France ARPEGE World",
+        "metno_seamless": "MET Norway Nordic Seamless (with ECMWF)",
+        "knmi_seamless": "KNMI Seamless (with ECMWF)",
+        "dmi_seamless": "DMI Seamless (with ECMWF)",
+        "ukmo_seamless": "UK Met Office Seamless",
+        "ukmo_global_deterministic_10km": "UK Met Office Global 10km",
+        "geosphere_seamless": "GeoSphere Seamless (with ECMWF)",
+    },
+    "North America only": {
+        "ncep_rrfs_north_america": "NCEP RRFS North America",
+        "ncep_rrfs_conus": "NCEP RRFS U.S. CONUS",
+        "ncep_hrrr_conus": "NCEP HRRR U.S. CONUS",
+        "ncep_nbm_conus": "NCEP NBM U.S. CONUS",
+        "cmc_gem_rdps": "GEM Regional",
+        "cmc_gem_hrdps": "GEM HRDPS Continental",
+        "cmc_gem_hrdps_west": "GEM HRDPS West",
+    },
+    "Europe only": {
+        "dwd_icon_eu": "DWD ICON EU",
+        "dwd_icon_eu_native": "DWD ICON EU Native",
+        "dwd_icon_d2": "DWD ICON D2",
+        "dwd_icon_d2_native": "DWD ICON D2 Native",
+        "dwd_icon_d2_ruc_native": "DWD ICON D2 RUC Native",
+        "meteofrance_arpege_europe": "Météo-France ARPEGE Europe",
+        "meteofrance_arome_france": "Météo-France AROME France",
+        "meteofrance_arome_france_hd": "Météo-France AROME France HD",
+        "italia_meteo_arpae_icon_2i": "ItaliaMeteo ARPAE ICON 2I",
+        "metno_nordic": "MET Norway Nordic",
+        "knmi_harmonie_arome_europe": "KNMI Harmonie AROME Europe",
+        "knmi_harmonie_arome_netherlands": "KNMI Harmonie AROME Netherlands",
+        "dmi_harmonie_arome_europe": "DMI Harmonie AROME Europe",
+        "ukmo_uk_deterministic_2km": "UK Met Office UK 2km",
+        "meteoswiss_icon_seamless": "MeteoSwiss ICON Seamless",
+        "meteoswiss_icon_ch1": "MeteoSwiss ICON CH1",
+        "meteoswiss_icon_ch2": "MeteoSwiss ICON CH2",
+        "geosphere_claef_austria": "GeoSphere C-LAEF Austria",
+        "chmi_aladin_seamless": "CHMI Aladin Seamless",
+        "chmi_aladin_central_europe_2km": "CHMI Aladin Central Europe 2km",
+        "chmi_aladin_cz_1km": "CHMI Aladin CZ 1km",
+    },
+    "Japan only": {
+        "jma_msm": "JMA MSM",
+    },
 }
 
 ABBREVIATIONS = {"st": "Saint", "ft": "Fort", "mt": "Mount", "jax": "Jacksonville", "bch": "Beach"}
@@ -936,11 +992,12 @@ def build_parser(name):
 
 def models_help():
     lines = ["", "models (--model NAME, or $WEATHER_MODEL):"]
-    lines += ["  %-22s %s" % (name, text) for name, text in MODELS.items()]
-    lines += ["  Open-Meteo has more (see open-meteo.com/en/docs). A model may leave some",
-              "  columns empty (for example rain chance) or cover fewer hours.", ""]
-    return "\n".join(lines)
-
+    for group, models in MODEL_GROUPS.items():
+        lines.append("  %s:" % group)
+        lines += ["    %-32s %s" % item for item in models.items()]
+    lines += ["  Regional models only work for locations inside their area. A model may leave",
+              "  some columns empty (for example rain chance) or cover fewer hours.", ""]
+    return "\n".join(lines) + "\n"
 
 def favorites_help():
     """The 'favorites' block for -h: where they live and which ones exist now."""
@@ -1001,7 +1058,7 @@ examples:
   open-meteo --city "Jacksonville, FL"
   open-meteo --zip 32202
   open-meteo --full            every column
-  open-meteo --model icon_seamless    compare against another weather model
+  open-meteo --model dwd_icon_seamless  compare against another weather model
   open-meteo --city Jacksonville --save-fav home    then: open-meteo -F home
   open-meteo --city Jacksonville --columns temp,rain,cond
 """
