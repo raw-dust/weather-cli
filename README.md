@@ -1,6 +1,6 @@
 # weather-cli
 
-Hourly weather forecasts in your terminal. It prints a compact, colored table
+Hourly, daily and morning-to-night weather forecasts in your terminal. It prints a compact, colored table
 with one row per hour (temperature, feels-like, rain chance, sky cover, wind,
 humidity and conditions), plus sunrise, sunset, twilight, moon and tide
 information for the day. You can save favorite places and choose exactly which
@@ -120,6 +120,9 @@ argument order. `nws -h` and `open-meteo -h` list them all.
 |---|---|
 | `-h`, `-?`, `--help` | show the help (every option, the column list, examples) |
 | `-n`, `--hours N` | hours to show (default 24; `nws` goes up to 156, `open-meteo` up to about 16 days); can be calculated, see below |
+| `-d`, `--daily` | one line per day instead of hourly (see [Daily view](#daily-view)) |
+| `-p`, `--periods` | morning, afternoon, evening and night (see [Period view](#period-view)) |
+| `--days N` | days in the daily view (default 7) or period view (default 4); without `-p` it implies `--daily` |
 | `-z`, `--zip ZIP` | US ZIP code |
 | `--lat DEG --lon DEG` | coordinates (`nws` only, used together) |
 | `-C`, `--city NAME` | city name, anywhere in the world (`open-meteo` only) |
@@ -133,6 +136,94 @@ argument order. `nws -h` and `open-meteo -h` list them all.
 | `--sky` / `--no-sky` | sun and moon lines and sunrise/sunset markers |
 | `--twilight KIND` | twilight on the sun line: `civil` (default), `nautical`, `astronomical` or `none` |
 | `--tides` / `--no-tides` | tide line and markers |
+
+### Daily view
+
+`--daily` (or `-d`) prints one line per day instead of one per hour. It takes
+the same location, favorite, model, sky and tide options as the hourly view;
+the sun, moon and tide lines at the top are for the first day.
+
+```bash
+nws --daily                         # one line per day, up to 7 days
+open-meteo -C Jacksonville --days 10
+```
+
+Example (`nws --daily`, without the title and sun lines):
+
+```
+Day        High °F  Low °F  Rain %  Conditions
+─────────  ───────  ──────  ──────  ──────────
+Thu 11/26      59*      43       0  ☁️ Cloudy
+Fri 11/27       59      46       0  ☀️ Sunny
+Sat 11/28       61      50       0  ☁️ Mostly cloudy
+Sun 11/29       66      62       1  ☁️ Mostly cloudy
+Mon 11/30       65      61      30  🌦️ Chance rain showers
+Tue 12/01       67      59      38  🌦️ Chance rain showers
+Wed 12/02       68       -       2  ⛅ Partly sunny
+```
+
+`--days` goes as far as the forecast does: about a week for `nws`, up to 16
+days for `open-meteo`.
+
+Both commands work these out from their hourly data, in the location's local
+time:
+
+- **High:** the warmest hour from 7 AM to 7 PM.
+- **Low:** the coldest hour from 7 PM to 8 AM the next morning.
+- **Rain %:** the highest hourly chance from 7 AM to 7 PM.
+- **Conditions:** from 7 AM to 7 PM. If at least a third of those hours have
+  rain or snow, the day shows it (thunderstorms if they are at least half of
+  the wet hours). Otherwise it shows the most common sky. NWS "slight chance"
+  hours don't count as wet.
+
+Overnight rain does not show in a day's rain chance or conditions. `-` means
+the forecast doesn't cover that period; after 7 PM, today's row describes
+tonight. `nws` data starts at the current hour, so a `*` marks a high for
+today that only covers the hours left. These figures can differ from the
+daily forecast on weather.gov. `-n`, `-c` and `-f` don't apply to this view.
+
+### Period view
+
+```bash
+nws --periods                       # rest of today plus the next 3 days
+open-meteo -p --days 5 -c +wind     # 5 days, with wind
+```
+
+Example (`nws -p --days 2`, without the title and sun and tide lines):
+
+```
+Date        Period      Temp °F  Feels °F  Rain %  Conditions
+──────────  ──────────  ───────  ────────  ──────  ──────────
+11/26/2026  Afternoon*    58-59                 0  ☁️ Cloudy
+            Evening       51-57                 0  🌙 Mostly clear
+            Night         45-49        41       0  ☁️ Partly cloudy
+11/27/2026  Morning       43-53        36       0  ☀️ Sunny
+            Afternoon     55-59                 0  🌤️ Mostly sunny
+            Evening       51-56                 0  ☁️ Mostly cloudy
+            Night         48-51        47       0  ☁️ Mostly cloudy
+```
+
+| Period | Hours (location's local time) |
+|---|---|
+| Morning | 6 AM to noon |
+| Afternoon | noon to 6 PM |
+| Evening | 6 PM to midnight |
+| Night | midnight to 6 AM at the end of that date, so early the next day |
+
+Each row sums up its hours: temperature from lowest to highest; feels-like from
+the hour furthest from the temperature (if 3° or more off); the highest rain
+chance; the strongest wind and gust; average cloud and humidity; and conditions
+by the same rule as the [daily view](#daily-view) (wet if at least 2 of the 6
+hours are).
+
+By default you get what is left of today plus the next 3 days. `--days N`
+counts today, so `--days 1` is just today.
+
+Periods that are over are left out. `*` means `nws` only has the hours left in
+the period in progress. A period cut off by the end of the forecast is dropped.
+The periods don't line up with the daily view's 7 AM to 7 PM, so a period's
+temperature can fall outside that day's high or low. `-c` and `-f` work; `-n`
+does not.
 
 ### Calculated hours
 
@@ -334,17 +425,19 @@ Favorite locations
 
 ```
 NWS hourly forecast: Jacksonville, FL · NWS grid JAX 68,67
-🌄 Dawn 6:33 AM  ·  🌅 Sunrise 6:58 AM  ·  🌇 Sunset 5:26 PM  ·  🌆 Dusk 5:52 PM
-⬆ Moonrise 4:27 PM  ·  ⬇ Moonset 5:55 AM  ·  🌔 Waxing gibbous (98%)
-🌊 Low 1:07 AM 0.0 ft  ·  High 7:24 AM 4.5 ft  ·  Low 2:08 PM 0.2 ft  ·  High 7:47 PM 3.9 ft
+🌄 Dawn 6:35 AM  ·  🌅 Sunrise 7:01 AM  ·  🌇 Sunset 5:26 PM  ·  🌆 Dusk 5:52 PM
+⬆ Moonrise 7:21 PM  ·  ⬇ Moonset 9:18 AM  ·  🌖 Waning gibbous (96%)
+🌊 Low 3:41 AM -0.2 ft  ·  High 10:14 AM 4.6 ft  ·  Low 4:46 PM 0.1 ft  ·  High 10:40 PM 3.9 ft
     (Dame Point, FL, 2 mi)
 
 Date         Time  Temp °F  Rain %  Conditions
 ──────────  ─────  ───────  ──────  ──────────
-11/23/2026   3 AM       61       0  ☁️ Mostly cloudy
-             4 AM       61       1  ☁️ Cloudy
-             5 AM       61       0  ☁️ Mostly cloudy
-             6 AM       60       0  ☁️ Mostly cloudy   🌅 6:58 AM
+11/26/2026   1 PM       58       0  ☁️ Cloudy
+             2 PM       59       0  ☁️ Cloudy
+             3 PM       59       0  ☁️ Cloudy
+             4 PM       59       0  ☁️ Mostly cloudy   🌊 L 4:46 PM
+             5 PM       58       0  ⛅ Partly sunny   🌇 5:26 PM
+             6 PM       57       0  ☁️ Partly cloudy
 ```
 
 One row per hour, starting at the current hour, in the forecast location's
@@ -363,26 +456,28 @@ nws --full -n 3 --no-sky --no-tides
 ```
 NWS hourly forecast: Jacksonville, FL · NWS grid JAX 68,67
 
-Date         Time  Temp °F  Rain %  Cloud %  Wind mph  Hum %  Conditions
-──────────  ─────  ───────  ──────  ───────  ────────  ─────  ──────────
-11/22/2026   3 PM       68       4       79    W 12       93  ☁️ Mostly cloudy
-             4 PM       68       6       79    W 12       93  ☁️ Mostly cloudy
-             5 PM       68       9       78    W  9       90  ☁️ Mostly cloudy
+Date         Time  Temp °F  Rain %  Cloud %  Wind mph      Hum %  Conditions
+──────────  ─────  ───────  ──────  ───────  ────────────  ─────  ──────────
+11/26/2026   1 PM       58       0       91    W 22 (g33)     75  ☁️ Cloudy
+             2 PM       59       0       90    W 22 (g33)     69  ☁️ Cloudy
+             3 PM       59       0       88    W 22 (g33)     69  ☁️ Cloudy
 ```
 
 ```bash
-open-meteo --city "Jacksonville, FL" -n 3 -c time,temp,rain,cond --no-tides
+open-meteo --city "Jacksonville, FL" -n 5 -c time,temp,rain,cond --no-tides
 ```
 ```
 Open-Meteo hourly forecast: Jacksonville, Florida (city center) · 30.33, -81.66
-🌅 Sunrise 6:58 AM  ·  🌇 Sunset 5:27 PM
-⬆ Moonrise 3:45 PM  ·  ⬇ Moonset 4:48 AM  ·  🌔 Waxing gibbous (95%)
+🌄 Dawn 6:35 AM  ·  🌅 Sunrise 7:01 AM  ·  🌇 Sunset 5:26 PM  ·  🌆 Dusk 5:52 PM
+⬆ Moonrise 7:21 PM  ·  ⬇ Moonset 9:19 AM  ·  🌖 Waning gibbous (96%)
 
  Time  Temp °F  Rain %  Conditions
 ─────  ───────  ──────  ──────────
- 3 PM       65       0  ☁️ Overcast
- 4 PM       64       0  ☁️ Overcast
- 5 PM       64       2  ☁️ Overcast   🌇 5:27 PM
+ 1 PM       55       0  ☁️ Overcast
+ 2 PM       56       0  ☁️ Overcast
+ 3 PM       56       0  ⛅ Partly cloudy
+ 4 PM       56       0  ⛅ Partly cloudy
+ 5 PM       55       0  ⛅ Partly cloudy   🌇 5:26 PM
 ```
 
 ### Sun and moon lines
@@ -392,8 +487,8 @@ day in the table, then moonrise, moonset and the moon phase (with how much of it
 is lit):
 
 ```
-🌄 Dawn 6:33 AM  ·  🌅 Sunrise 6:58 AM  ·  🌇 Sunset 5:26 PM  ·  🌆 Dusk 5:52 PM
-⬆ Moonrise 4:27 PM  ·  ⬇ Moonset 5:55 AM  ·  🌔 Waxing gibbous (98%)
+🌄 Dawn 6:35 AM  ·  🌅 Sunrise 7:01 AM  ·  🌇 Sunset 5:26 PM  ·  🌆 Dusk 5:52 PM
+⬆ Moonrise 7:21 PM  ·  ⬇ Moonset 9:18 AM  ·  🌖 Waning gibbous (96%)
 ```
 
 - **Twilight:** dawn and dusk are **civil twilight** by default, when the sun
@@ -427,9 +522,9 @@ is lit):
   changes (they follow the `cond` column, so they disappear if you hide it):
 
   ```
-               5 PM       68       9  ☁️ Mostly cloudy   🌇 5:27 PM
+               5 PM       58       0  ⛅ Partly sunny   🌇 5:26 PM
                ...
-               6 AM       61       1  ☁️ Mostly cloudy   🌅 6:58 AM
+               7 AM       43       0  ☀️ Sunny   🌅 7:02 AM
   ```
 
 - The day/night icons come from the forecast services' own day/night flags, not
@@ -460,14 +555,14 @@ on the hour it happens (the markers show `H` or `L` and the time only; the full
 words and heights are on the summary line):
 
 ```
-🌊 Low 12:16 AM 0.2 ft  ·  High 6:32 AM 4.4 ft  ·  Low 1:13 PM 0.4 ft  ·  High 6:53 PM 3.9 ft
+🌊 Low 3:41 AM -0.2 ft  ·  High 10:14 AM 4.6 ft  ·  Low 4:46 PM 0.1 ft  ·  High 10:40 PM 3.9 ft
     (Dame Point, FL, 2 mi)
 ```
 
 ```
-             6 PM  ☁️ Mostly cloudy   🌊 H 6:53 PM
-             1 AM  ☁️ Mostly cloudy   🌊 L 1:07 AM
-             7 AM  ☁️ Mostly cloudy   🌊 H 7:24 AM
+             4 PM  ☁️ Mostly cloudy   🌊 L 4:46 PM
+            10 PM  🌙 Mostly clear   🌊 H 10:40 PM
+             4 AM  ☁️ Partly cloudy   🌊 L 4:35 AM
 ```
 
 - **Source:** NOAA's CO-OPS tide predictions (free, no key), for the nearest

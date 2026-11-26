@@ -3,6 +3,7 @@
 `open-meteo` (worldwide). Run either with -h for options and examples."""
 import argparse
 import ast
+import collections
 import concurrent.futures
 import difflib
 import datetime as dt
@@ -183,7 +184,9 @@ def render(title, rows, columns, info=None):
         sys.exit("No forecast data returned")
     for r in rows:   # only show "feels like" when it meaningfully differs
         f = r.get("feels")
-        if f is None or r["temp"] is None or abs(f - r["temp"]) < FEELS_MIN_DIFF:
+        # period rows have already chosen their feels-like value
+        if "period" not in r and (f is None or r["temp"] is None
+                                  or abs(f - r["temp"]) < FEELS_MIN_DIFF):
             r["feels"] = None
 
     def num_cells(key, colors):
@@ -205,8 +208,12 @@ def render(title, rows, columns, info=None):
     # name -> (header, alignment, cells[(text, color, bold)]) or None if no data
     builders = {
         "date": lambda: ("Date", "<", dates),
-        "time": lambda: ("Time", ">", [(t12(r["time"]), None, False) for r in rows]),
-        "temp": lambda: ("Temp °F", ">", num_cells("temp", TEMP_COLOR)),
+        "time": lambda: ("Period", "<", [(r["period"], None, False) for r in rows])
+            if "period" in rows[0] else
+            ("Time", ">", [(t12(r["time"]), None, False) for r in rows]),
+        "temp": lambda: ("Temp °F", ">", [
+            (r.get("temp_text", text), code, bold)
+            for r, (text, code, bold) in zip(rows, num_cells("temp", TEMP_COLOR))]),
         "feels": lambda: ("Feels °F", ">", [
             ("" if r["feels"] is None else str(r["feels"]),
              r["feels"] is not None and scale(r["feels"], TEMP_COLOR), False)
@@ -246,6 +253,156 @@ def render(title, rows, columns, info=None):
                 + (f"   {paint(r['sun'], 220)}" if r.get("sun") else "")
             parts.append(f"{r['icon']} {r['cond']}{mark}")
         print("  ".join(parts))
+
+
+# daily view: the NWS forecast-grid split, in the location's local time
+DAY_START, DAY_END = 7, 19   # high, rain chance and conditions: 7 AM to 7 PM
+NIGHT_END = 8                # low: 7 PM to 8 AM the next morning
+WET_SHARE = 1 / 3            # share of daytime hours that makes it a wet day
+DEFAULT_DAYS = 7
+WET_WORDS = ("rain", "shower", "drizzle", "thunder", "t-storm", "snow", "sleet",
+             "flurr", "ice pellets", "wintry")
+
+
+def is_wet(text):
+    """True for precipitation conditions; NWS "slight chance" hours don't count."""
+    t = text.lower()
+    return not t.startswith("slight chance") and any(w in t for w in WET_WORDS)
+
+
+def day_condition(rows):
+    """(icon, text) summing up a block of hours. Wet if at least WET_SHARE of them
+    are (thunder if that is the most common kind), else the most common dry sky."""
+    wet = [r for r in rows if is_wet(r["cond"])]
+    if len(wet) >= len(rows) * WET_SHARE:
+        thunder = [r for r in wet if re.search("thunder|t-storm", r["cond"], re.I)]
+        pool = thunder if len(thunder) * 2 >= len(wet) else [r for r in wet if r not in thunder]
+    else:   # hours worded as precipitation (even a slight chance) don't describe the sky
+        pool = [r for r in rows if not any(w in r["cond"].lower() for w in WET_WORDS)] or rows
+    text = collections.Counter(r["cond"] for r in pool).most_common(1)[0][0]
+    icons = collections.Counter(r["icon"] for r in pool if r["cond"] == text)
+    return icons.most_common(1)[0][0], text
+
+
+def daily_rows(hourly, days):
+    """Roll hourly rows (oldest first) up into one row per calendar day."""
+    by_day, by_night = {}, {}
+    for r in hourly:
+        t = r["time"]
+        if DAY_START <= t.hour < DAY_END:
+            by_day.setdefault(t.date(), []).append(r)
+        if t.hour >= DAY_END:
+            by_night.setdefault(t.date(), []).append(r)
+        elif t.hour < NIGHT_END:
+            by_night.setdefault(t.date() - dt.timedelta(days=1), []).append(r)
+    if not hourly:
+        return []
+    first, last = hourly[0]["time"], hourly[-1]["time"]
+    out = []
+    for date in sorted(set(by_day) | set(by_night)):
+        if date < first.date():   # the tail of last night
+            continue
+        day, night = by_day.get(date, []), by_night.get(date, [])
+        # a block cut off by the end of the forecast would give a false high or low
+        if day and date == last.date() and last.hour < DAY_END - 1:
+            day = []
+        if night and (last.date(), last.hour) < (date + dt.timedelta(days=1), DAY_START - 1):
+            night = []
+        if not day and not (night and date == first.date()):
+            continue
+        icon, text = day_condition(day or night)
+        rain = [r["rain"] for r in (day or night) if r["rain"] is not None]
+        out.append({"date": date,
+                    "high": max((r["temp"] for r in day if r["temp"] is not None), default=None),
+                    "low": min((r["temp"] for r in night if r["temp"] is not None), default=None),
+                    "rain": max(rain, default=None),
+                    "icon": icon, "cond": text if day else f"Tonight: {text}",
+                    # the data starts after the day did, so the high may have passed
+                    "partial": bool(day) and date == first.date() and first.hour > DAY_START})
+        if len(out) >= days:
+            break
+    return out
+
+
+# period view: four 6-hour blocks. Night is the early hours of the NEXT date.
+PERIODS = (("Morning", 6), ("Afternoon", 12), ("Evening", 18), ("Night", 24))
+DEFAULT_PERIOD_DAYS = 4   # today's remaining periods plus the next 3 days
+
+
+def period_rows(hourly, days, now):
+    """Roll hourly rows (oldest first) up into one row per period that hasn't
+    ended yet. `now` is the location's current time, on the hour."""
+    blocks = {}
+    for r in hourly:
+        t = r["time"]
+        date = t.date() - dt.timedelta(days=1) if t.hour < 6 else t.date()
+        blocks.setdefault((date, (t.hour - 6) % 24 // 6), []).append(r)
+    out = []
+    for (date, index), hours in sorted(blocks.items()):
+        name, start_hour = PERIODS[index]
+        midnight = dt.datetime.combine(date, dt.time(), tzinfo=now.tzinfo)
+        start = midnight + dt.timedelta(hours=start_hour)
+        end = start + dt.timedelta(hours=6)
+        if date >= now.date() + dt.timedelta(days=days):
+            break
+        # skip blocks that are over, or cut short by the end of the forecast
+        if end <= now or hours[-1]["time"] < end - dt.timedelta(hours=1):
+            continue
+
+        def values(key):
+            return [r[key] for r in hours if r[key] is not None]
+
+        def average(key):
+            found = values(key)
+            return round(sum(found) / len(found)) if found else None
+
+        temps = values("temp")
+        low, high = (min(temps), max(temps)) if temps else (None, None)
+        off = [r for r in hours if r["feels"] is not None and r["temp"] is not None
+               and abs(r["feels"] - r["temp"]) >= FEELS_MIN_DIFF]
+        windy = max((r for r in hours if r["wind"] is not None),
+                    key=lambda r: r["wind"], default=None)
+        wind = windy["wind"] if windy else None
+        gust = max(values("gust"), default=None)
+        icon, text = day_condition(hours)
+        # the data starts after the block did, so earlier hours are missing
+        partial = hours[0]["time"] > start
+        out.append({"time": midnight, "period": name + ("*" if partial else ""),
+                    "temp": None if high is None else round((low + high) / 2),   # for color
+                    "temp_text": "-" if high is None else str(high) if low == high
+                    else f"{low}{' to ' if low < 0 else '-'}{high}",
+                    "feels": max(off, key=lambda r: abs(r["feels"] - r["temp"]))["feels"]
+                    if off else None,
+                    "rain": max(values("rain"), default=None),
+                    "wind": wind, "wdir": windy["wdir"] if windy else "",
+                    "gust": gust if gust is not None and wind is not None and gust - wind >= 5 else None,
+                    "cloud": average("cloud"), "hum": average("hum"),
+                    "icon": icon, "cond": text})
+    return out
+
+
+def render_daily(title, rows, info=None):
+    """Print one line per day: high, low, rain chance and conditions."""
+    if not rows:
+        sys.exit("No forecast data returned")
+    print(paint(title, bold=True))
+    for line in (info or "").splitlines():
+        print(paint(line, 245))
+    print()
+    head = f"{'Day':<9}  {'High °F':>7}  {'Low °F':>6}  {'Rain %':>6}  Conditions"
+    print(paint(head, bold=True))
+    print("  ".join("─" * w for w in (9, 7, 6, 6, 10)))
+
+    def cell(value, width, colors, mark=""):
+        text = ("-" if value is None else f"{value}{mark}").rjust(width)
+        return paint(text, None if value is None else scale(value, colors))
+
+    for r in rows:
+        print("  ".join([paint(f"{r['date']:%a %m/%d}", bold=True),
+                         cell(r["high"], 7, TEMP_COLOR, "*" if r["partial"] else ""),
+                         cell(r["low"], 6, TEMP_COLOR),
+                         cell(r["rain"], 6, RAIN_COLOR),
+                         f"{r['icon']} {r['cond']}"]))
 
 
 def fetch(url, params=None, missing_ok=False, fatal=True, headers=None, retries=0):
@@ -583,7 +740,7 @@ def forecast_icon(text, day):
     return "☁️"
 
 
-def nws(hours, lat, lon, columns, sky=True, tides=True, fav=None, twilight="civil"):
+def nws(hours, lat, lon, columns, sky=True, tides=True, fav=None, twilight="civil", days=None, period_days=None):
     lat, lon = round(lat, 4), round(lon, 4)   # the API wants at most 4 decimals
     point = json.loads(fetch(f"{NWS_API}/points/{lat},{lon}", headers=NWS_HEADERS,
                              missing_ok=True, retries=2))
@@ -638,7 +795,7 @@ def nws(hours, lat, lon, columns, sky=True, tides=True, fav=None, twilight="civi
         t = dt.datetime.fromisoformat(p["startTime"])
         if t < now:
             continue
-        if len(rows) >= hours:
+        if not (days or period_days) and len(rows) >= hours:
             break
         key = int(t.timestamp() // 3600)
         speeds = re.findall(r"\d+", p.get("windSpeed") or "")
@@ -666,13 +823,20 @@ def nws(hours, lat, lon, columns, sky=True, tides=True, fav=None, twilight="civi
         info = (sky_line(first.date(), None, None, rise, mrise, mset) if rise in ("day", "night")
                 else sky_line(first.date(), rise, sset, "normal", mrise, mset, dawn, dusk, twilight))
     if tides:
-        tl = add_tides(rows, lat, lon)
+        tl = add_tides([r for r in rows if r["time"].date() == rows[0]["time"].date()]
+                       if days or period_days else rows, lat, lon)
         info = "\n".join(x for x in (info, tl) if x) or None
-    render("NWS hourly forecast: " + place + (f" · ★ {fav}" if fav else ""), rows, columns, info)
+    title = place + (f" · ★ {fav}" if fav else "")
+    if days:
+        render_daily("NWS daily forecast: " + title, daily_rows(rows, days), info)
+    elif period_days:
+        render("NWS period forecast: " + title, period_rows(rows, period_days, now), columns, info)
+    else:
+        render("NWS hourly forecast: " + title, rows, columns, info)
 
 
 def open_meteo(hours, lat, lon, label, columns, sky=True, tides=True, fav=None, model=None,
-               twilight="civil"):
+               twilight="civil", days=None, period_days=None):
     params = {
         "latitude": lat, "longitude": lon,
         "current": "temperature_2m",
@@ -683,7 +847,8 @@ def open_meteo(hours, lat, lon, label, columns, sky=True, tides=True, fav=None, 
         "daily": "sunrise,sunset",
         "timezone": "auto",
         # enough days for the hours asked (today is partly over); 16 is the API maximum
-        "forecast_days": min(16, max(3, (hours + 47) // 24))}
+        "forecast_days": min(16, (days or period_days) + 1 if days or period_days
+                             else max(3, (hours + 47) // 24))}
     if model:
         params["models"] = model
     try:
@@ -699,7 +864,9 @@ def open_meteo(hours, lat, lon, label, columns, sky=True, tides=True, fav=None, 
         series = h.get(key)
         return series[i] if series and i < len(series) else None
 
-    now = data["current"]["time"][:13]
+    # the daily and period views start at midnight, so today's high and the period
+    # in progress use all of their hours
+    now = data["current"]["time"][:10 if days or period_days else 13]
     marks = {}   # local hour -> "🌅 6:55 AM"
     if sky:
         for k, d in enumerate(data["daily"]["time"]):
@@ -709,7 +876,7 @@ def open_meteo(hours, lat, lon, label, columns, sky=True, tides=True, fav=None, 
                     ev = dt.datetime.fromisoformat(v)
                     marks[ev.strftime("%Y-%m-%dT%H")] = f"{icon} {clock(ev)}"
     rows = []
-    for i in [i for i, s in enumerate(h["time"]) if s[:13] >= now][:hours]:
+    for i in [i for i, s in enumerate(h["time"]) if s[:len(now)] >= now][:None if days or period_days else hours]:
         temp = val("temperature_2m", i)
         if temp is None:   # this model's forecast ends here
             break
@@ -747,11 +914,19 @@ def open_meteo(hours, lat, lon, label, columns, sky=True, tides=True, fav=None, 
             up = any(val("is_day", i) for i, s in enumerate(h["time"]) if s[:10] == first.isoformat())
             info = sky_line(first, None, None, "day" if up else "night", mrise, mset)
     if tides:
-        tl = add_tides(rows, lat, lon)
+        tl = add_tides([r for r in rows if r["time"].date() == rows[0]["time"].date()]
+                       if days or period_days else rows, lat, lon)
         info = "\n".join(x for x in (info, tl) if x) or None
-    render(f"Open-Meteo hourly forecast: {label} · {lat:.2f}, {lon:.2f}"
-           + (f" · model {model}" if model else "") + (f" · ★ {fav}" if fav else ""),
-           rows, columns, info)
+    title = (f"{label} · {lat:.2f}, {lon:.2f}"
+             + (f" · model {model}" if model else "") + (f" · ★ {fav}" if fav else ""))
+    if days:
+        render_daily("Open-Meteo daily forecast: " + title, daily_rows(rows, days), info)
+    elif period_days:
+        now_hour = dt.datetime.fromisoformat(data["current"]["time"][:13] + ":00")
+        render("Open-Meteo period forecast: " + title, period_rows(rows, period_days, now_hour),
+               columns, info)
+    else:
+        render("Open-Meteo hourly forecast: " + title, rows, columns, info)
 
 
 MODEL_GROUPS = {   # coverage -> {name: description}, as offered on open-meteo.com/en/docs
@@ -980,9 +1155,9 @@ def build_parser(name):
     nws_cmd = name == "nws"
     p = argparse.ArgumentParser(
         prog=name, add_help=False, formatter_class=argparse.RawDescriptionHelpFormatter,
-        description=("NWS hourly forecast (US only, no API key)." if nws_cmd else
-                     "Open-Meteo hourly forecast (worldwide, no API key)."),
-        epilog=(EXAMPLES_NWS if nws_cmd else EXAMPLES_OPEN_METEO + models_help()) + favorites_help() + columns_help())
+        description=("NWS hourly, daily or period forecast (US only, no API key)." if nws_cmd else
+                     "Open-Meteo hourly, daily or period forecast (worldwide, no API key)."),
+        epilog=(EXAMPLES_NWS if nws_cmd else EXAMPLES_OPEN_METEO + models_help()) + daily_help() + periods_help() + favorites_help() + columns_help())
     p.add_argument("-h", "-?", "--help", action="help", help="show this help message and exit")
     where = p.add_argument_group("location (default: %s)" % default_description())
     where.add_argument("-z", "--zip", metavar="ZIP", help="US ZIP code")
@@ -1009,6 +1184,13 @@ def build_parser(name):
     p.add_argument("-n", "--hours", type=whole_number, metavar="N",
                    help="hours to show (default 24); can be calculated with + - * / x and "
                         "parentheses, e.g. 24x7 (quote * and parentheses: '24*7')")
+    p.add_argument("-d", "--daily", action="store_true",
+                   help="one line per day: high, low, rain chance and conditions")
+    p.add_argument("-p", "--periods", action="store_true",
+                   help="morning, afternoon, evening and night summaries")
+    p.add_argument("--days", type=whole_number, metavar="N",
+                   help="days in the daily view (default %d) or period view (default %d); "
+                        "without --periods it implies --daily" % (DEFAULT_DAYS, DEFAULT_PERIOD_DAYS))
     p.add_argument("-c", "--columns", metavar="LIST",
                    help="columns to show, see \"available columns\" below; default %s" % DEFAULT_COLUMNS)
     p.add_argument("-f", "--full", action="store_true",
@@ -1051,6 +1233,45 @@ def favorites_help():
     ])
 
 
+def daily_help():
+    """The 'daily view' block for -h."""
+    return "\n".join([
+        "",
+        "daily view (-d / --daily, or --days N):",
+        "  one line per day, %d days unless --days says otherwise" % DEFAULT_DAYS,
+        "  High        warmest hour, 7 AM to 7 PM",
+        "  Low         coldest hour, 7 PM to 8 AM the next morning",
+        "  Rain %      highest hourly chance, 7 AM to 7 PM",
+        "  Conditions  rain or snow if at least a third of the 7 AM-7 PM hours have it",
+        "              (NWS \"slight chance\" hours don't count), else the commonest sky",
+        "  *           high covers only the hours left today",
+        "  -           not covered by the forecast",
+        "  Not usable with -n, -c or -f.",
+    ]) + "\n"
+
+
+def periods_help():
+    """The 'period view' block for -h."""
+    return "\n".join([
+        "",
+        "period view (-p / --periods):",
+        "  what is left of today plus the next %d days; --days counts today too" % (DEFAULT_PERIOD_DAYS - 1),
+        "  periods that are over are left out",
+        "  Morning     6 AM to noon",
+        "  Afternoon   noon to 6 PM",
+        "  Evening     6 PM to midnight",
+        "  Night       midnight to 6 AM at the END of that date (early the next day)",
+        "  temp        lowest to highest hour",
+        "  feels       the hour furthest from the temperature, if 3° or more off",
+        "  rain        highest hourly chance",
+        "  wind        strongest hour, and the highest gust",
+        "  cloud, hum  average",
+        "  cond        same rule as the daily view",
+        "  *           only the hours left in this period",
+        "  -c and -f work; -n does not.",
+    ]) + "\n"
+
+
 def columns_help():
     """The 'available columns' block for -h, built from COLUMN_HELP."""
     default = DEFAULT_COLUMNS.split(",")
@@ -1078,7 +1299,9 @@ EXAMPLES_NWS = """
 examples:
   nws                          next 24 hours at the default location
   nws --hours 48               next 48 hours
-  nws -n 24x6                  next 6 days
+  nws -n 24x6                  next 6 days, hourly
+  nws --daily                  one line per day for a week
+  nws --periods                today's remainder and the next 3 days
   nws --zip 32202 -n 12        another ZIP code (downtown Jacksonville)
   nws --lat 30.33 --lon -81.66
   nws --full                   every column
@@ -1090,7 +1313,9 @@ EXAMPLES_OPEN_METEO = """
 examples:
   open-meteo                   next 24 hours at the default location
   open-meteo --city Jacksonville -n 12
-  open-meteo -n 24x7           a week (up to 16 days)
+  open-meteo -n 24x7           a week, hourly (up to 16 days)
+  open-meteo --days 10         one line per day for 10 days
+  open-meteo -p --days 5       morning to night for 5 days
   open-meteo --city "Jacksonville, FL"
   open-meteo --zip 32202
   open-meteo --full            every column
@@ -1138,6 +1363,14 @@ def main():
         parser.error("twilight must be civil, nautical, astronomical or none: %s" % twilight)
     if ns.full and ns.columns is not None:
         parser.error("use either --full or --columns, not both")
+    if ns.daily and ns.periods:
+        parser.error("use either --daily or --periods, not both")
+    periods = (ns.days or DEFAULT_PERIOD_DAYS) if ns.periods else None
+    days = None if periods else ns.days or (DEFAULT_DAYS if ns.daily else None)
+    if periods and ns.hours:
+        parser.error("--periods counts days: don't use -n (use --days)")
+    if days and (ns.hours or ns.full or ns.columns is not None):
+        parser.error("--daily has fixed columns and counts days: don't use -n, -c or -f (use --days)")
     columns = parse_columns("all" if ns.full else ns.columns if ns.columns is not None else
                             os.environ.get("WEATHER_COLUMNS") or DEFAULT_COLUMNS)
     if ns.list_favs:
@@ -1222,14 +1455,15 @@ def main():
             print(f"★ {'Updated' if replaced else 'Saved'} favorite '{shown}': {label} · "
                   f"{lat:.2f}, {lon:.2f}\n")
         if name == "nws":
-            nws(ns.hours or 24, lat, lon, columns, sky, tides, fav_name, twilight)
+            nws(ns.hours or 24, lat, lon, columns, sky, tides, fav_name, twilight, days, periods)
         else:
             model = (ns.model or os.environ.get("WEATHER_MODEL") or "").strip().lower()
             if model in ("", "best_match"):
                 model = None
             elif not re.fullmatch(r"[a-z0-9_]+", model):
                 parser.error("model names use letters, digits and underscores: %s" % model)
-            open_meteo(ns.hours or 24, lat, lon, label, columns, sky, tides, fav_name, model, twilight)
+            open_meteo(ns.hours or 24, lat, lon, label, columns, sky, tides, fav_name, model, twilight,
+                       days, periods)
     except ValueError:
         parser.error("could not understand the arguments (try -h)")
     except BrokenPipeError:
